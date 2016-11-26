@@ -40,7 +40,9 @@ class PlaybinGstError(PlaybinError):
         return '%s: %s' % (self.code, super().__str__())
 
 
-StreamTrack = collections.namedtuple('StreamTrack', ['index', 'lang'])
+class StreamTrack(collections.namedtuple('StreamTrack', ['index', 'lang'])):
+    def __str__(self):
+        return 'Unknown' if self.lang is None else self.lang
 
 
 def state_change(func):
@@ -138,22 +140,26 @@ class PlaybinWrapper(BasePlaybinWrapper):
         return self._subtitles[:]
 
     def _get_subtitle(self):
-        return self._element.get_property('current-text') if self.isSubtitleEnabled() else -1
-    def _set_subtitle(self, index):
-        self.enableSubtitle(index != -1)
-        if index != -1:
-            self._element.set_property('current-text', index)
+        if self.isSubtitleEnabled():
+            return self._subtitles[self._element.get_property('current-text')]
+        return None
+    def _set_subtitle(self, track):
+        self.enableSubtitle(track is not None)
+        if track is not None:
+            self._element.set_property('current-text', track.index)
     subtitle = property(_get_subtitle, _set_subtitle)
 
     def audio_tracks(self):
         return self._audio[:]
 
     def _get_audio_track(self):
-        return self._element.get_property('current-audio') if self.isAudioEnabled() else -1
-    def _set_audio_track(self, index):
-        self.enableAudio(index != -1)
-        if index != -1:
-            self._element.set_property('current-audio', index)
+        if self.isAudioEnabled():
+            return self._audio[self._element.get_property('current-audio')]
+        return None
+    def _set_audio_track(self, track):
+        self.enableAudio(track is not None)
+        if track is not None:
+            self._element.set_property('current-audio', track.index)
     audio_track = property(_get_audio_track, _set_audio_track)
 
     def _parse_tags(self, trackname):
@@ -330,7 +336,7 @@ class Playbin(object):
         return self._playbin.subtitle
     def _set_subtitle(self, index):
         self._playbin.subtitle = index
-    subtitle = property(_get_subtitle, _set_subtitle, doc="""Current subtitle index (-1 to disable)""")
+    subtitle = property(_get_subtitle, _set_subtitle, doc="""Current subtitle track, or None""")
 
     def _get_subtitle_file(self):
         uri = self._playbin.get_property('suburi')
@@ -346,23 +352,17 @@ class Playbin(object):
         return self._playbin.audio_track
     def _set_audio_track(self, index):
         self._playbin.audio_track = index
-    audio_track = property(_get_audio_track, _set_audio_track, """Audio track index (-1 to disable)""")
+    audio_track = property(_get_audio_track, _set_audio_track, """Current audio track, or None""")
 
     def subtitle_tracks(self):
         """
-        Returns available subtitle tracks as named tuples with the following attributes:
-
-          * `index`: Subtitle index
-          * `lang`: Language code, or None if not available
+        Returns available subtitle tracks
         """
         return self._playbin.subtitle_tracks()
 
     def audio_tracks(self):
         """
-        Returns available audio tracks as named tuples with the following attributes:
-
-          * `index`: Track index
-          * `lang`: Language code, or None if not available
+        Returns available audio tracks
         """
         return self._playbin.audio_tracks()
 

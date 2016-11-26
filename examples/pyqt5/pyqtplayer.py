@@ -159,20 +159,23 @@ class MultipleChoiceAction(QtWidgets.QAction):
         hasTracks = False
         for track in self._getTracks():
             hasTracks = True
-            action = self.menu().addAction(track.lang or 'Unknown')
+            action = self.menu().addAction(str(track.lang))
             self._bindAction(action, track)
         if hasTracks:
             action = self.menu().addAction('Disable')
-            self._bindAction(action, StreamTrack(-1, 'Disable'))
+            self._bindAction(action, None)
         self.setEnabled(hasTracks)
 
-    def currentValue(self):
+    def currentTrack(self):
         raise NotImplementedError
 
     def iconName(self):
         raise NotImplementedError
 
     def _getTracks(self):
+        raise NotImplementedError
+
+    def setTrack(self, track):
         raise NotImplementedError
 
     def _bindAction(self, action, track):
@@ -183,35 +186,35 @@ class MultipleChoiceAction(QtWidgets.QAction):
         action.setCheckable(True)
 
     def _checkActions(self):
-        current = self.currentValue()
+        current = self.currentTrack()
         for action in self.menu().actions():
             if action.data():
-                action.setChecked(current == action.data().index)
+                action.setChecked(current == action.data())
 
 
 class SubtitleSelectionAction(MultipleChoiceAction):
-    def currentValue(self):
+    def currentTrack(self):
         return self._playbin.subtitle
 
     def iconName(self):
         return 'text'
 
     def setTrack(self, track):
-        self._playbin.subtitle = track.index
+        self._playbin.subtitle = track
 
     def _getTracks(self):
         yield from self._playbin.subtitle_tracks()
 
 
 class AudioSelectionAction(MultipleChoiceAction):
-    def currentValue(self):
+    def currentTrack(self):
         return self._playbin.audio_track
 
     def iconName(self):
         return 'audio'
 
     def setTrack(self, track):
-        self._playbin.audio_track = track.index
+        self._playbin.audio_track = track
 
     def _getTracks(self):
         yield from self._playbin.audio_tracks()

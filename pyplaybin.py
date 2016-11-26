@@ -98,6 +98,18 @@ class BasePlaybinWrapper(object):
     def set_property(self, name, value):
         self._element.set_property(name, value)
 
+    def set_state(self, state):
+        return self._element.set_state(state)
+
+    def query_position(self, unit):
+        return self._element.query_position(unit)
+
+    def query_duration(self, unit):
+        return self._element.query_duration(unit)
+
+    def seek(self, *args):
+        self._element.seek(*args)
+
     def _isEnabled(self, value):
         return (self._element.get_property('flags') & value) != 0
 
@@ -234,17 +246,14 @@ class Playbin(object):
         try:
             vsink = None
 
-            self.pipeline = Gst.Pipeline.new('pyplaybin')
+            playbin = Gst.ElementFactory.make('playbin', 'playbin')
+            self._playbin = PlaybinWrapper(playbin)
 
-            bus = self.pipeline.get_bus()
+            bus = playbin.get_bus()
             bus.add_signal_watch()
             bus.connect('message::error', self._error)
             bus.connect('message::eos', self._EOS)
             bus.connect('message::async-done', self._async_done)
-
-            playbin = Gst.ElementFactory.make('playbin', 'playbin')
-            self._playbin = PlaybinWrapper(playbin)
-            self.pipeline.add(playbin)
 
             vsink = self.create_video_sink('videosink')
             asink = self.create_audio_sink('audiosink')
@@ -300,26 +309,26 @@ class Playbin(object):
             self._playbin.enableAudio()
             self._playbin.enableSubtitle()
             self._playbin.set_property('uri', 'file://%s' % os.path.abspath(filename))
-        return self.pipeline.set_state(Gst.State.PLAYING)
+        return self._playbin.set_state(Gst.State.PLAYING)
 
     @state_change
     def pause(self):
         """
         Pauses playback
         """
-        return self.pipeline.set_state(Gst.State.PAUSED)
+        return self._playbin.set_state(Gst.State.PAUSED)
 
     @state_change
     def stop(self):
         """
         Stops playback
         """
-        return self.pipeline.set_state(Gst.State.NULL)
+        return self._playbin.set_state(Gst.State.NULL)
 
     @property
     def position(self):
         """The current stream position, in native GStreamer units. Divide by Gst.SECOND to get seconds."""
-        ret, pos = self.pipeline.query_position(Gst.Format.TIME)
+        ret, pos = self._playbin.query_position(Gst.Format.TIME)
         if not ret:
             raise PlaybinError('Cannot get position')
         return pos
@@ -327,7 +336,7 @@ class Playbin(object):
     @property
     def duration(self):
         """The current stream duration, in native GStreamer units. Divide by Gst.SECOND to get seconds."""
-        ret, dur = self.pipeline.query_duration(Gst.Format.TIME)
+        ret, dur = self._playbin.query_duration(Gst.Format.TIME)
         if not ret:
             raise PlaybinError('Cannot get duration')
         return dur
@@ -371,7 +380,7 @@ class Playbin(object):
         """
         Seek to specified position, in GStreamer units.
         """
-        self.pipeline.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH|Gst.SeekFlags.KEY_UNIT, Gst.SeekType.SET, position, Gst.SeekType.NONE, -1)
+        self._playbin.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH|Gst.SeekFlags.KEY_UNIT, Gst.SeekType.SET, position, Gst.SeekType.NONE, -1)
 
     @asyncio.coroutine
     def rewind(self, duration):

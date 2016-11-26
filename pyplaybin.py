@@ -13,7 +13,13 @@ gi.require_version('GstVideo', '1.0')
 gi.require_version('GstTag', '1.0')
 
 from gi.repository import Gst, GstVideo, GstTag, GObject
-import os, threading, functools, asyncio, sys, collections
+import os, threading, functools, asyncio, sys, collections, platform
+
+
+def create_future():
+    if sys.version_info >= (3, 5, 2):
+        return asyncio.get_event_loop().create_future()
+    return asyncio.Future()
 
 
 class PlaybinError(Exception):
@@ -48,7 +54,7 @@ def state_change(func):
     def wrapper(self, *args, **kwargs):
         ret = func(self, *args, **kwargs)
         if ret == Gst.StateChangeReturn.ASYNC:
-            ft = asyncio.get_event_loop().create_future()
+            ft = create_future()
             self._async_response.append(ft)
             yield from ft
         elif ret != Gst.StateChangeReturn.SUCCESS:
@@ -67,7 +73,7 @@ def gst_async(func):
     @asyncio.coroutine
     def wrapper(self, *args, **kwargs):
         func(self, *args, **kwargs)
-        ft = asyncio.get_event_loop().create_future()
+        ft = create_future()
         self._async_response.append(ft)
         return (yield from ft)
     return wrapper
@@ -92,12 +98,15 @@ class Playbin(object):
         self._async_loop = asyncio.get_event_loop()
         self._async_response = []
 
-        evt = threading.Event()
-        error = [None]
-        GObject.timeout_add(0, self._build, win_id, evt, error)
-        evt.wait()
-        if error[0]:
-            raise PlaybinError from error[0]
+        if platform.system() == 'Darwin':
+            evt = threading.Event()
+            error = [None]
+            GObject.timeout_add(1, self._build, win_id, evt, error)
+            evt.wait()
+            if error[0]:
+                raise PlaybinError from error[0]
+        else:
+            self._build(win_id, None, None)
 
     @classmethod
     def start_glib_loop(cls):
@@ -144,9 +153,12 @@ class Playbin(object):
             self._playbin.set_property('video-sink', vsink)
             self._playbin.set_property('audio-sink', asink)
         except Exception as exc:
+            if error is None:
+                raise
             error[0] = exc
 
-        evt.set()
+        if evt is not None:
+            evt.set()
         if win_id is not None and vsink is not None:
             vsink.set_window_handle(win_id)
 

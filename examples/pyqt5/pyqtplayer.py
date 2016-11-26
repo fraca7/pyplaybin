@@ -7,7 +7,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 
-from pyplaybin import Playbin, StreamTrack
+from pyplaybin import Playbin, StreamTrack, PlaybinError
 from PyQt5 import QtCore, QtGui, QtWidgets
 from quamash import QEventLoop
 
@@ -18,7 +18,7 @@ from quamash import QEventLoop
 def async_slot(func):
     @functools.wraps(func)
     def slot(self, *args, **kwargs):
-        asyncio.ensure_future(func(self, *args, **kwargs))
+        asyncio.get_event_loop().create_task(func(self, *args, **kwargs))
     return slot
 
 
@@ -249,7 +249,7 @@ class Viewport(QtWidgets.QWidget):
         yield from self.playbin.play(filename)
 
     def closeEvent(self, event):
-        asyncio.ensure_future(self.playbin.stop())
+        asyncio.get_event_loop().create_task(self.playbin.stop())
         event.accept()
         self.playback_stopped.emit()
 
@@ -269,7 +269,7 @@ class Player(QtWidgets.QWidget):
     def __init__(self, filename):
         super().__init__()
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint|QtCore.Qt.FramelessWindowHint)
-        asyncio.ensure_future(self._setup(filename))
+        asyncio.get_event_loop().create_task(self._setup(filename))
 
     @asyncio.coroutine
     def _setup(self, filename):

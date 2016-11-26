@@ -79,6 +79,98 @@ def gst_async(func):
     return wrapper
 
 
+class BasePlaybinWrapper(object):
+    """
+    Base class for objects that encapsulate access details to the playbin element
+    """
+
+    def __init__(self, element):
+        self._element = element
+
+    def setup(self):
+        pass
+
+    def get_property(self, name):
+        return self._element.get_property(name)
+
+    def set_property(self, name, value):
+        self._element.set_property(name, value)
+
+    def _isEnabled(self, value):
+        return (self._element.get_property('flags') & value) != 0
+
+    def _enable(self, value, enabled):
+        flags = self._element.get_property('flags')
+        if enabled:
+            flags |= value
+        else:
+            flags &= ~value
+        self._element.set_property('flags', flags)
+
+    def isAudioEnabled(self):
+        return self._isEnabled(2)
+
+    def enableAudio(self, enabled=True):
+        self._enable(2, enabled)
+
+    def isSubtitleEnabled(self):
+        return self._isEnabled(4)
+
+    def enableSubtitle(self, enabled=True):
+        self._enable(4, enabled)
+
+
+class PlaybinWrapper(BasePlaybinWrapper):
+    """
+    Wrapper for the 'playbin' element
+    """
+
+    def __init__(self, element):
+        super().__init__(element)
+        self._subtitles = None
+        self._audio = None
+
+    def setup(self):
+        self._subtitles = list(self._parse_tags('text'))
+        self._audio = list(self._parse_tags('audio'))
+
+    def subtitle_tracks(self):
+        return self._subtitles[:]
+
+    def _get_subtitle(self):
+        return self._element.get_property('current-text') if self.isSubtitleEnabled() else -1
+    def _set_subtitle(self, index):
+        self.enableSubtitle(index != -1)
+        if index != -1:
+            self._element.set_property('current-text', index)
+    subtitle = property(_get_subtitle, _set_subtitle)
+
+    def audio_tracks(self):
+        return self._audio[:]
+
+    def _get_audio_track(self):
+        return self._element.get_property('current-audio') if self.isAudioEnabled() else -1
+    def _set_audio_track(self, index):
+        self.enableAudio(index != -1)
+        if index != -1:
+            self._element.set_property('current-audio', index)
+    audio_track = property(_get_audio_track, _set_audio_track)
+
+    def _parse_tags(self, trackname):
+        count = self._element.get_property('n-%s' % trackname)
+        for index in range(count):
+            tags = self._element.emit('get-%s-tags' % trackname, index)
+            if tags is not None:
+                for tagidx in range(tags.n_tags()):
+                    name = tags.nth_tag_name(tagidx)
+                    if name == 'language-code':
+                        code = tags.get_string(name)[1]
+                        lang = GstTag.tag_get_language_name(code)
+                        yield StreamTrack(index, lang or code)
+                        break
+
+
+
 class Playbin(object):
     """
     Wrapper around a GStreamer pipeline base on the playbin element.
@@ -144,8 +236,9 @@ class Playbin(object):
             bus.connect('message::eos', self._EOS)
             bus.connect('message::async-done', self._async_done)
 
-            self._playbin = Gst.ElementFactory.make('playbin', 'playbin')
-            self.pipeline.add(self._playbin)
+            playbin = Gst.ElementFactory.make('playbin', 'playbin')
+            self._playbin = PlaybinWrapper(playbin)
+            self.pipeline.add(playbin)
 
             vsink = self.create_video_sink('videosink')
             asink = self.create_audio_sink('audiosink')
@@ -186,13 +279,20 @@ class Playbin(object):
         This will be called if an error occurs asynchronously.
         """
 
-    @state_change
+    @asyncio.coroutine
     def play(self, filename=None):
         """
         Starts playing.
         """
+        yield from self._play(filename=filename)
         if filename is not None:
-            self._playbin.set_property('flags', self._playbin.get_property('flags') | 6) # Enable sound and subtitles
+            self._playbin.setup()
+
+    @state_change
+    def _play(self, filename=None):
+        if filename is not None:
+            self._playbin.enableAudio()
+            self._playbin.enableSubtitle()
             self._playbin.set_property('uri', 'file://%s' % os.path.abspath(filename))
         return self.pipeline.set_state(Gst.State.PLAYING)
 
@@ -227,40 +327,25 @@ class Playbin(object):
         return dur
 
     def _get_subtitle(self):
-        if self._playbin.get_property('flags') & 4: # Subtitles enabled
-            return self._playbin.get_property('current-text')
-        return -1
-
+        return self._playbin.subtitle
     def _set_subtitle(self, index):
-        if index == -1:
-            self._playbin.set_property('flags', self._playbin.get_property('flags') & ~4)
-        else:
-            self._playbin.set_property('flags', self._playbin.get_property('flags') | 4)
-            self._playbin.set_property('current-text', index)
-
+        self._playbin.subtitle = index
     subtitle = property(_get_subtitle, _set_subtitle, doc="""Current subtitle index (-1 to disable)""")
 
     def _get_subtitle_file(self):
-        uri = self._playbin.suburi
+        uri = self._playbin.get_property('suburi')
         return None if uri is None else uri[7:]
 
     def _set_subtitle_file(self, filename):
-        self._playbin.suburi = 'file://%s' % os.path.abspath(filename)
+        self._playbin.enableSubtitle()
+        self._playbin.set_property('suburi', 'file://%s' % os.path.abspath(filename))
 
     subtitle_file = property(_get_subtitle_file, _set_subtitle_file, doc="""Subtitle file name""")
 
     def _get_audio_track(self):
-        if self._playbin.get_property('flags') & 2: # Audio enabled
-            return self._playbin.get_property('current-audio')
-        return -1
-
+        return self._playbin.audio_track
     def _set_audio_track(self, index):
-        if index == -1:
-            self._playbin.set_property('flags', self._playbin.get_property('flags') & ~2)
-        else:
-            self._playbin.set_property('flags', self._playbin.get_property('flags') | 2)
-            self._playbin.set_property('current-audio', index)
-
+        self._playbin.audio_track = index
     audio_track = property(_get_audio_track, _set_audio_track, """Audio track index (-1 to disable)""")
 
     def subtitle_tracks(self):
@@ -270,7 +355,7 @@ class Playbin(object):
           * `index`: Subtitle index
           * `lang`: Language code, or None if not available
         """
-        yield from self._parse_tags('text')
+        return self._playbin.subtitle_tracks()
 
     def audio_tracks(self):
         """
@@ -279,20 +364,7 @@ class Playbin(object):
           * `index`: Track index
           * `lang`: Language code, or None if not available
         """
-        yield from self._parse_tags('audio')
-
-    def _parse_tags(self, trackname):
-        count = self._playbin.get_property('n-%s' % trackname)
-        for index in range(count):
-            tags = self._playbin.emit('get-%s-tags' % trackname, index)
-            if tags is not None:
-                for tagidx in range(tags.n_tags()):
-                    name = tags.nth_tag_name(tagidx)
-                    if name == 'language-code':
-                        code = tags.get_string(name)[1]
-                        lang = GstTag.tag_get_language_name(code)
-                        yield StreamTrack(index, lang or code)
-                        break
+        return self._playbin.audio_tracks()
 
     @gst_async
     def seek(self, position):

@@ -227,11 +227,16 @@ class Viewport(QtWidgets.QWidget):
     playback_stopped = QtCore.pyqtSignal()
     geometry_changed = QtCore.pyqtSignal()
 
-    def __init__(self, filename):
+    def __init__(self, controls, filename):
         super().__init__()
+        self._controls = controls
         self.setWindowTitle(filename)
+        self.setMouseTracking(True)
         self.show()
         self.raise_()
+
+    def mouseMoveEvent(self, event):
+        self._controls.onUserActivity()
 
     @asyncio.coroutine
     def start_playing(self, filename):
@@ -269,17 +274,26 @@ class Viewport(QtWidgets.QWidget):
 class Player(QtWidgets.QWidget):
     playback_stopped = QtCore.pyqtSignal()
 
+    # Show/hide animation states
+    STATE_HIDDEN = 0
+    STATE_SHOWING = 1
+    STATE_SHOWN = 2
+    STATE_HIDING = 3
+
     def __init__(self, filename):
         super().__init__()
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint|QtCore.Qt.FramelessWindowHint)
+        self._showState = self.STATE_SHOWN
+        self._showAnimation = None
         asyncio.get_event_loop().create_task(self._setup(filename))
 
     @asyncio.coroutine
     def _setup(self, filename):
-        self._viewport = Viewport(filename)
+        self._viewport = Viewport(self, filename)
         self._viewport.geometry_changed.connect(self._recenter)
         self._viewport.playback_stopped.connect(self._stop_playback)
         self._isPlaying = True
+        self._hideTimer = None
         yield from self._viewport.start_playing(filename)
 
         toolbar = QtWidgets.QToolBar(self)
@@ -314,7 +328,7 @@ class Player(QtWidgets.QWidget):
         volume.setFixedWidth(100)
 
         vlayout = QtWidgets.QVBoxLayout()
-        vlayout.setContentsMargins(0, 0, 0, 0)
+        vlayout.setContentsMargins(3, 3, 3, 3)
         vlayout.setSpacing(2)
         hlayout = QtWidgets.QHBoxLayout()
         hlayout.setContentsMargins(0, 0, 0, 0)
@@ -332,17 +346,62 @@ class Player(QtWidgets.QWidget):
         self.setLayout(vlayout)
 
         self._recenter()
-        self.setWindowOpacity(0.3)
         self.show()
+        self.startHiding()
 
     def changeVolume(self, value):
         self._viewport.playbin.volume = 1.0 * value / 100
 
+    def onUserActivity(self):
+        self.startShowing()
+        if self._hideTimer is not None:
+            self._hideTimer.cancel()
+        self._hideTimer = asyncio.get_event_loop().call_later(1, self.startHiding)
+
+    def enterEvent(self, event):
+        if self._hideTimer is not None:
+            self._hideTimer.cancel()
+            self._hideTimer = None
+
+    def startHiding(self):
+        self._hideTimer = None
+        if self._showState in [self.STATE_HIDING, self.STATE_HIDDEN]:
+            return
+        if self._showState == self.STATE_HIDING:
+            self._showAnimation.stop()
+        self._showState = self.STATE_HIDING
+        self._showAnimation = QtCore.QPropertyAnimation(self, b'windowOpacity')
+        self._showAnimation.setStartValue(self.windowOpacity())
+        self._showAnimation.setEndValue(0.0)
+        self._showAnimation.setDuration(500)
+        self._showAnimation.finished.connect(self._showAnimationFinished)
+        self._showAnimation.start()
+
+    def startShowing(self):
+        if self._showState in [self.STATE_SHOWING, self.STATE_SHOWN]:
+            return
+        if self._showState == self.STATE_SHOWING:
+            self._showAnimation.stop()
+        self._showState = self.STATE_SHOWING
+        self._showAnimation = QtCore.QPropertyAnimation(self, b'windowOpacity')
+        self._showAnimation.setStartValue(self.windowOpacity())
+        self._showAnimation.setEndValue(1.0)
+        self._showAnimation.setDuration(500)
+        self._showAnimation.finished.connect(self._showAnimationFinished)
+        self._showAnimation.start()
+
+    def _showAnimationFinished(self):
+        if self._showState == self.STATE_SHOWING:
+            self._showState = self.STATE_SHOWN
+        else:
+            self._showState = self.STATE_HIDDEN
+        self._showAnimation = None
+
     def _recenter(self):
         rect = QtCore.QRect(QtCore.QPoint(0, 0), self.sizeHint())
         rect.moveCenter(self._viewport.mapToGlobal(self._viewport.rect().center()))
-        dy = self._viewport.height() // 2 - rect.height() // 2
-        rect.adjust(-20, -dy, 20, -dy)
+        dy = self._viewport.height() // 2 - rect.height()
+        rect.adjust(-20, dy, 20, dy)
         self.setGeometry(rect)
 
     @async_slot

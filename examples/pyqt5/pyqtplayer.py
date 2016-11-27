@@ -232,8 +232,8 @@ class Viewport(QtWidgets.QWidget):
         self._controls = controls
         self.setWindowTitle(filename)
         self.setMouseTracking(True)
+        self.setWindowState(self.windowState() | QtCore.Qt.WindowFullScreen)
         self.show()
-        self.raise_()
 
     def mouseMoveEvent(self, event):
         self._controls.onUserActivity()

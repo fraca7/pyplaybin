@@ -294,7 +294,7 @@ class Player(QtWidgets.QWidget):
     def _setup(self, filename):
         self._viewport = Viewport(self, filename)
         self._viewport.geometry_changed.connect(self._recenter)
-        self._viewport.playback_stopped.connect(self._stop_playback)
+        self._viewport.playback_stopped.connect(self._playback_stopped)
         self._isPlaying = True
         self._hideTimer = None
         yield from self._viewport.start_playing(filename)
@@ -422,15 +422,80 @@ class Player(QtWidgets.QWidget):
             yield from self._viewport.playbin.play()
             self._isPlaying = True
 
-    @async_slot
     def _stop_playback(self, toggled=False):
+        self._viewport.close()
+        self._playback_stopped()
+
+    @async_slot
+    def _playback_stopped(self):
         yield from self._seeker.stop()
         yield from self._viewport.playbin.stop()
+        self.close()
         self.playback_stopped.emit()
 
     @async_slot
     def _forward(self, toggled=False):
         yield from self._viewport.playbin.forward(60)
+
+
+class MainViewport(QtWidgets.QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self._list = QtWidgets.QListWidget(self)
+        self._list.itemDoubleClicked.connect(self._playItem)
+        vlayout = QtWidgets.QVBoxLayout()
+        vlayout.addWidget(self._list, stretch=1)
+
+        btn = QtWidgets.QPushButton('', self)
+        btn.setIcon(QtGui.QIcon('../icons/add.svg'))
+        btn.setFlat(True)
+        btn.clicked.connect(self._browse)
+        hlayout = QtWidgets.QHBoxLayout()
+        hlayout.addWidget(btn)
+        hlayout.addStretch(1)
+        vlayout.addLayout(hlayout)
+
+        self.setLayout(vlayout)
+
+    def _browse(self):
+        settings = QtCore.QSettings()
+        path = settings.value('LastPath', os.getcwd())
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(None, 'Choose video file', path)
+        if filename:
+            item = QtWidgets.QListWidgetItem(os.path.basename(filename), self._list)
+            item.setData(QtCore.Qt.UserRole, filename)
+            settings.setValue('LastPath', os.path.dirname(filename))
+            self._player = Player(filename)
+            self._player.playback_stopped.connect(self._playbackStopped)
+
+    def _playItem(self, item):
+        filename = item.data(QtCore.Qt.UserRole)
+        self._player = Player(filename)
+        self._player.playback_stopped.connect(self._playbackStopped)
+
+    def _playbackStopped(self):
+        self._player = None
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('pyplaybin Qt demo')
+        self.setCentralWidget(MainViewport(self))
+
+        settings = QtCore.QSettings()
+        if settings.contains('Geometry'):
+            self.restoreGeometry(settings.value('Geometry'))
+        else:
+            self.resize(800, 600)
+        self.show()
+        self.raise_()
+
+    def closeEvent(self, event):
+        Playbin.stop_glib_loop()
+        asyncio.get_event_loop().stop()
+        event.ignore()
 
 
 class Application(QtWidgets.QApplication):
@@ -446,20 +511,11 @@ class Application(QtWidgets.QApplication):
         self._loop = QEventLoop()
         asyncio.set_event_loop(self._loop)
 
-        self.askForFile()
+        self.window = MainWindow()
 
     def run(self):
         with self._loop:
             self._loop.run_forever()
-
-    def askForFile(self):
-        filename, _ = QtWidgets.QFileDialog.getOpenFileName(None, 'Choose video file')
-        if filename:
-            self._player = Player(filename)
-            self._player.playback_stopped.connect(self.askForFile)
-        else:
-            Playbin.stop_glib_loop()
-            self._loop.stop()
 
 
 if __name__ == '__main__':

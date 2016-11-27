@@ -401,6 +401,12 @@ class Playbin(object):
         pos += duration * Gst.SECOND
         yield from self.seek(min(dur, pos))
 
+    def _get_volume(self):
+        return self._playbin.get_property('volume')
+    def _set_volume(self, value):
+        self._playbin.set_property('volume', value)
+    volume = property(_get_volume, _set_volume, doc="Volume (float, 0.0 to 1.0)")
+
     def _error(self, bus, msg):
         err, dbg = msg.parse_error()
         try:

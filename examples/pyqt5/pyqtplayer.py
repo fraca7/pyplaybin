@@ -306,6 +306,13 @@ class Player(QtWidgets.QWidget):
 
         self._seeker = SeekSlider(self._viewport.playbin, self)
 
+        volume = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        volume.setMinimum(0)
+        volume.setMaximum(100)
+        volume.setValue(int(100 * self._viewport.playbin.volume))
+        volume.valueChanged.connect(self.changeVolume)
+        volume.setFixedWidth(100)
+
         vlayout = QtWidgets.QVBoxLayout()
         vlayout.setContentsMargins(0, 0, 0, 0)
         vlayout.setSpacing(2)
@@ -315,12 +322,21 @@ class Player(QtWidgets.QWidget):
         hlayout.addWidget(toolbar, stretch=1)
         hlayout.addWidget(self._seeker.remainingWidget())
         vlayout.addLayout(hlayout)
-        vlayout.addWidget(self._seeker)
+        hlayout = QtWidgets.QHBoxLayout()
+        vol = QtWidgets.QLabel('')
+        vol.setPixmap(QtGui.QIcon('../icons/volume.svg').pixmap(24, 24))
+        hlayout.addWidget(vol)
+        hlayout.addWidget(volume)
+        hlayout.addWidget(self._seeker, stretch=1)
+        vlayout.addLayout(hlayout)
         self.setLayout(vlayout)
 
         self._recenter()
         self.setWindowOpacity(0.3)
         self.show()
+
+    def changeVolume(self, value):
+        self._viewport.playbin.volume = 1.0 * value / 100
 
     def _recenter(self):
         rect = QtCore.QRect(QtCore.QPoint(0, 0), self.sizeHint())

@@ -247,9 +247,12 @@ class Viewport(QtWidgets.QWidget):
                 self.eos.emit()
 
             def create_video_sink(self, name):
-                # default (gl) sink does not play well with GstOverlay, at least not when using Qt
                 if platform.system() == 'Darwin':
+                    # default (gl) sink does not play well with GstOverlay, at least not when using Qt
                     return Gst.ElementFactory.make('osxvideosink', name)
+                elif platform.system() == 'Linux':
+                    # Same for the default on Linux...
+                    return Gst.ElementFactory.make('xvimagesink', name)
                 return super().create_video_sink(name)
 
         self.playbin = QtPlaybin(win_id=self.winId())

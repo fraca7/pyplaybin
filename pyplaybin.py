@@ -17,6 +17,9 @@ import os, threading, functools, asyncio, sys, collections, platform
 
 
 def create_future():
+    """
+    Create a future, Python 3.4 and 3.5 compatible
+    """
     if sys.version_info >= (3, 5, 2):
         return asyncio.get_event_loop().create_future()
     return asyncio.Future()
@@ -30,17 +33,22 @@ class PlaybinError(Exception):
 
 class PlaybinGstError(PlaybinError):
     """
-    GStreamer error
+    GStreamer state change error.
     """
     def __init__(self, code, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.code = code
+        """The return value that resulted in this (a Gst.StateChangeReturn)."""
 
     def __str__(self):
         return '%s: %s' % (self.code, super().__str__())
 
 
 class StreamTrack(collections.namedtuple('StreamTrack', ['index', 'lang'])):
+    """
+    This class abstracts a track in a media file (subtitle, audio track).
+    """
+
     def __str__(self):
         return 'Unknown' if self.lang is None else self.lang
 
@@ -191,7 +199,7 @@ class PlaybinWrapper(BasePlaybinWrapper):
 
 class Playbin(object):
     """
-    Wrapper around a GStreamer pipeline base on the playbin element.
+    Wrapper around a GStreamer pipeline based on the playbin element.
     """
 
     glib_loop = None
@@ -221,7 +229,9 @@ class Playbin(object):
     @classmethod
     def start_glib_loop(cls):
         """
-        If your program does not use the GLib loop, call this first.
+        If your program does not use the GLib loop, call this
+        first. It initializes threads, GStreamer, and starts the GLib
+        loop in a separate thread.
         """
         GObject.threads_init()
         Gst.init(None)
@@ -233,7 +243,8 @@ class Playbin(object):
     @classmethod
     def stop_glib_loop(cls):
         """
-        Call this before exiting.
+        Call this before exiting; it stops and joins the GLib loop
+        created by :func:`start_glib_loop`.
         """
         cls.glib_loop.quit()
         cls.glib_thread.join()
@@ -286,18 +297,21 @@ class Playbin(object):
 
     def end_of_stream(self):
         """
-        This will be called on EOS.
+        Overload this to be notified on end of stream.
         """
 
     def async_error(self, exc):
         """
-        This will be called if an error occurs asynchronously.
+        Override this to be notified when an error occurs during playback.
         """
 
     @asyncio.coroutine
     def play(self, filename=None):
         """
-        Starts playing.
+        **asynchronous**
+        Starts playing. If `filename` is specified, it's loaded and
+        starts from scratch; else the previously loaded file is
+        resumed.
         """
         yield from self._play(filename=filename)
         if filename is not None:
@@ -314,20 +328,22 @@ class Playbin(object):
     @state_change
     def pause(self):
         """
-        Pauses playback
+        **asynchronous**
+        Pauses playback.
         """
         return self._playbin.set_state(Gst.State.PAUSED)
 
     @state_change
     def stop(self):
         """
-        Stops playback
+        **asynchronous**
+        Stops playback.
         """
         return self._playbin.set_state(Gst.State.NULL)
 
     @property
     def position(self):
-        """The current stream position, in native GStreamer units. Divide by Gst.SECOND to get seconds."""
+        """The current stream position, in native GStreamer units. Divide by Gst.SECOND to get seconds. (read only)"""
         ret, pos = self._playbin.query_position(Gst.Format.TIME)
         if not ret:
             raise PlaybinError('Cannot get position')
@@ -335,49 +351,16 @@ class Playbin(object):
 
     @property
     def duration(self):
-        """The current stream duration, in native GStreamer units. Divide by Gst.SECOND to get seconds."""
+        """The current stream duration, in native GStreamer units. Divide by Gst.SECOND to get seconds. (read only)"""
         ret, dur = self._playbin.query_duration(Gst.Format.TIME)
         if not ret:
             raise PlaybinError('Cannot get duration')
         return dur
 
-    def _get_subtitle(self):
-        return self._playbin.subtitle
-    def _set_subtitle(self, index):
-        self._playbin.subtitle = index
-    subtitle = property(_get_subtitle, _set_subtitle, doc="""Current subtitle track, or None""")
-
-    def _get_subtitle_file(self):
-        uri = self._playbin.get_property('suburi')
-        return None if uri is None else uri[7:]
-
-    def _set_subtitle_file(self, filename):
-        self._playbin.enableSubtitle()
-        self._playbin.set_property('suburi', 'file://%s' % os.path.abspath(filename))
-
-    subtitle_file = property(_get_subtitle_file, _set_subtitle_file, doc="""Subtitle file name""")
-
-    def _get_audio_track(self):
-        return self._playbin.audio_track
-    def _set_audio_track(self, index):
-        self._playbin.audio_track = index
-    audio_track = property(_get_audio_track, _set_audio_track, """Current audio track, or None""")
-
-    def subtitle_tracks(self):
-        """
-        Returns available subtitle tracks
-        """
-        return self._playbin.subtitle_tracks()
-
-    def audio_tracks(self):
-        """
-        Returns available audio tracks
-        """
-        return self._playbin.audio_tracks()
-
     @gst_async
     def seek(self, position):
         """
+        **asynchronous**
         Seek to specified position, in GStreamer units.
         """
         self._playbin.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH|Gst.SeekFlags.KEY_UNIT, Gst.SeekType.SET, position, Gst.SeekType.NONE, -1)
@@ -385,6 +368,7 @@ class Playbin(object):
     @asyncio.coroutine
     def rewind(self, duration):
         """
+        **asynchronous**
         Rewind by specified duration, in seconds.
         """
         pos = self.position
@@ -394,6 +378,7 @@ class Playbin(object):
     @asyncio.coroutine
     def forward(self, duration):
         """
+        **asynchronous**
         Forward by specified duration, in seconds.
         """
         pos = self.position
@@ -401,11 +386,43 @@ class Playbin(object):
         pos += duration * Gst.SECOND
         yield from self.seek(min(dur, pos))
 
+    def _get_subtitle(self):
+        return self._playbin.subtitle
+    def _set_subtitle(self, index):
+        self._playbin.subtitle = index
+    subtitle = property(_get_subtitle, _set_subtitle, doc="""Current subtitle track, or None (read/write).""")
+
+    def _get_subtitle_file(self):
+        uri = self._playbin.get_property('suburi')
+        return None if uri is None else uri[7:]
+    def _set_subtitle_file(self, filename):
+        self._playbin.enableSubtitle()
+        self._playbin.set_property('suburi', 'file://%s' % os.path.abspath(filename))
+    subtitle_file = property(_get_subtitle_file, _set_subtitle_file, doc="""Subtitle file name (read/write).""")
+
+    def _get_audio_track(self):
+        return self._playbin.audio_track
+    def _set_audio_track(self, index):
+        self._playbin.audio_track = index
+    audio_track = property(_get_audio_track, _set_audio_track, doc="""Current audio track, or None (read/write).""")
+
+    def subtitle_tracks(self):
+        """
+        Returns available subtitle tracks. This will only be available after the playback starts.
+        """
+        return self._playbin.subtitle_tracks()
+
+    def audio_tracks(self):
+        """
+        Returns available audio tracks. This will only be available after the playback starts.
+        """
+        return self._playbin.audio_tracks()
+
     def _get_volume(self):
         return self._playbin.get_property('volume')
     def _set_volume(self, value):
         self._playbin.set_property('volume', value)
-    volume = property(_get_volume, _set_volume, doc="Volume (float, 0.0 to 1.0)")
+    volume = property(_get_volume, _set_volume, doc="Sound volume, from 0.0 to 1.0 (read/write).")
 
     def _error(self, bus, msg):
         err, dbg = msg.parse_error()

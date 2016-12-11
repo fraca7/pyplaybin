@@ -136,7 +136,7 @@ class BasePlaybinWrapper(object):
         self._enable(2, enabled)
 
     def isSubtitleEnabled(self):
-        return self._isEnabled(4)
+        return self._isEnabled(4) and self._element.get_property('n-text') != 0
 
     def enableSubtitle(self, enabled=True):
         self._enable(4, enabled)
